@@ -1,0 +1,28 @@
+{
+    "name": "hatthi/connector",
+    "description": "Allows to interactively connect to you Hatthi project",
+    "type": "laravel",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Hatthi\\Connector\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "inglucifer83",
+            "email": "stanescu83@gmail.com"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Hatthi\\Connector\\HatthiServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable",
+    "require": {
+        "phrity/websocket": "^3.1"
+    }
+}
