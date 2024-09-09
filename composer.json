@@ -17,7 +17,7 @@
     "extra": {
         "laravel": {
             "providers": [
-                "Hatthi\\Connector\\HatthiServiceProvider"
+                "Hatthi\\Connector\\Providers\\HatthiServiceProvider"
             ]
         }
     },
