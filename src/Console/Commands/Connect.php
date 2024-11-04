@@ -44,7 +44,7 @@ class Connect extends Command {
             ->onText(function (Client $client, Connection $connection, Message $message) {
                 $decodedMessage = json_decode($message->getContent(), true);
                 if ($decodedMessage['data'] == 'auth') {
-                    $message = ['id' => 1, 'secret' => '125kyrJsWhRI5EWGaYKeBuLjmnRCOy2i'];
+                    $message = ['id' => env('HATTHI_ID', 0), 'secret' => env('HATTHI_SECRET', '')];
                     $client->text(json_encode($message));
                 } else if (is_array($decodedMessage['data']) && isset($decodedMessage['data']['action']) && $decodedMessage['data']['action'] == 'save') {
                     $zipContents = file_get_contents($decodedMessage['data']['files']);
