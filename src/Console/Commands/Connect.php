@@ -12,12 +12,9 @@ use WebSocket\Connection;
 use WebSocket\Message\Message;
 use WebSocket\Middleware\CloseHandler;
 use WebSocket\Middleware\PingResponder;
-use WebSocket\Server;
 use ZipArchive;
 
 class Connect extends Command {
-
-    private static $serveProcs = [];
     /**
      * The name and signature of the console command.
      *
@@ -32,6 +29,62 @@ class Connect extends Command {
      */
     protected $description = 'Command description';
 
+    private function startArtisan() {
+        $availablePorts = [];
+        for ($i = 0; $i < 11; $i += 1) { 
+            $port = 8000 + $i;
+            $availablePorts[] = "$port";
+        }
+
+        $psProcess = Process::run("ps -o pid -o ppid -o args | grep 'php artisan serve'");
+        $psLines = explode("\n", $psProcess->output());
+        $runningProcesses = [];
+        $foreignProcesses = [];
+        foreach ($psLines as $procLine) {
+            $cleanedLine = trim(preg_replace('/\s+/', ' ', $procLine));
+            $columns = explode(' ', $cleanedLine);
+            array_splice($columns, 2, count($columns), [implode(' ', array_slice($columns, 2, count($columns)))]);
+            if ($columns[count($columns) - 1] == 'php artisan serve' && count($columns) > 1) {
+                if ($columns[1] == 1) {
+                    $runningProcesses[] = $columns[0];
+                } else {
+                    $foreignProcesses[] = $columns[0];
+                }
+            }
+        }
+
+        $currentAddress = '';
+
+        if (count($runningProcesses) > 1) {
+            $this->info('Restarting development server... ');
+            foreach ($runningProcesses as $pid) {
+                Process::run('kill -15 ' .$pid);
+            }
+
+            Process::run('php artisan serve &');
+            sleep(2);
+
+            $lsofProcess = Process::run('lsof -P -iTCP -sTCP:LISTEN');
+            $lsofLines = explode("\n", $lsofProcess->output());
+
+            
+            foreach ($lsofLines as $index => $procLine) {
+                if ($index == 0) {
+                    continue;
+                }
+                $cleanedLine = trim(preg_replace('/\s+/', ' ', $procLine));
+                $columns = explode(' ', $cleanedLine);
+                if (Str::contains($columns[count($columns) - 2], $availablePorts) && !in_array($columns[1], $foreignProcesses)) {
+                    $currentAddress = "http://{$columns[count($columns) - 2]}";
+                }
+            }
+        }
+
+        if ($currentAddress) {
+            Process::run("open $currentAddress");
+        }
+    }
+
     /**
      * Execute the console command.
      *
@@ -39,12 +92,12 @@ class Connect extends Command {
      */
     public function handle()
     {
-        $server = new Server(8080);
-        $server->addMiddleware(new CloseHandler())
-        ->addMiddleware(new PingResponder())
-        ->onText(function(Server $server, Connection $connection, Message $message) {
-            $this->line($message->getContent());
-        })->start();
+        $this->trap([SIGTERM, SIGQUIT, SIGINT], function () {
+            $client = new Client("ws://127.0.0.1:8080");
+            $client->addMiddleware(new CloseHandler())->addMiddleware(new PingResponder());
+            $client->text('sys: die');
+            $client->close();
+        });
 
         $client = new Client("wss://ws.stx-software.com:8180");
         $client->setTimeout(86400);
@@ -55,6 +108,7 @@ class Connect extends Command {
             // Listen to incoming Text messages
             ->onText(function (Client $client, Connection $connection, Message $message) {
                 $decodedMessage = json_decode($message->getContent(), true);
+                
                 if ($decodedMessage['data'] == 'auth') {
                     $message = ['id' => env('HATTHI_ID'), 'secret' => env('HATTHI_SECRET', '')];
                     $client->text(json_encode($message));
@@ -68,11 +122,14 @@ class Connect extends Command {
                     $zip->extractTo(storage_path("app/data/sync/"));
                     $zip->close();
 
-                    $this->line('Zip file downloaded');
+                    $this->info('Sync file downloaded');
                     $disk = Storage::build(['driver' => 'local', 'root' => base_path("storage/app/data/sync")]);
                     $syncedFiles = $disk->files("/", true);
 
                     foreach ($syncedFiles as $file) {
+                        if (Str::contains($file, 'composer')) {
+                            continue;
+                        }
                         File::move($disk->path($file), $file);
                         $this->line('Updated ' .basename($file));
                     }
@@ -80,29 +137,35 @@ class Connect extends Command {
                     File::delete(storage_path("app/data/sync.zip"));
                     File::deleteDirectory(storage_path("app/data/sync/"));
 
-                    foreach (self::$serveProcs as $proc) {
-                        $proc->stop();
-                    }
+                    $client = new Client("ws://127.0.0.1:8080");
+                    $client->addMiddleware(new CloseHandler())->addMiddleware(new PingResponder());
+                    $client->text('sys: synced');
+                    $client->close();
 
-                    self::$serveProcs = [];
-
-                    // $process = Process::start('php artisan serve', function($type, $output) {
-                    //     $this->line('Artisan said: ' .$output);
-                    //     if (Str::contains(strtolower($output), 'server running on')) {
-                    //         $urlRe = '/\[(http:\/\/.*)\]/m';
-
-                    //         preg_match_all($urlRe, strtolower($output), $matches, PREG_SET_ORDER, 0);
-
-                    //         Process::run('open ');
-
-                    //     }
-                    // });
-
-                    self::$serveProcs[] = $process;
-
-
+                    //$this->startArtisan();
                 } else {
-                    $this->line($message->getContent());
+                    $messageText = isset($decodedMessage['data']) ? $decodedMessage['data'] : null;
+                    if ($messageText) {
+                        if (Str::contains($messageText, 'Access Granted', true)) {
+                            $messageParts = explode(':', $messageText);
+                            $hasAddress = count($messageParts) > 1;
+                            $address = $hasAddress ? trim(implode(':', array_slice($messageParts, 1))) : null;
+                            $this->line('Connected!');
+                            if ($address) {
+                                $this->info('Logging in...');
+                                //-a \"Opera\"
+                                Process::run("open $address");
+                                $this->info('Launching local WS server...');
+                                Process::run('php artisan hatthi:listen &');
+                                $this->info('...did it!');
+                            }
+                        } else {
+                            $this->info($messageText);
+                        }
+                        
+                    } else {
+                        $this->error('Unknown Message Received');
+                    }
                 }
             })->start();
 
