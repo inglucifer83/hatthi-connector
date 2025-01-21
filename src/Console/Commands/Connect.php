@@ -115,6 +115,14 @@ class Connect extends Command {
                 } else if (is_array($decodedMessage['data']) && isset($decodedMessage['data']['action']) && $decodedMessage['data']['action'] == 'sync') {
                     $zipContents = file_get_contents($decodedMessage['data']['files']);
 
+                    $localDisk = Storage::build([
+                        'driver' => 'local',
+                        'root' => storage_path('app')]
+                    );
+                    if (!$localDisk->exists('data')) {
+                        $localDisk->makeDirectory('data');
+                    }
+                    
                     file_put_contents(storage_path("app/data/sync.zip"), $zipContents);
 
                     $zip = new ZipArchive;
